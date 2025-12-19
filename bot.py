@@ -13,7 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton
+    Reply estatesKeyboardMarkup, KeyboardButton
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -117,7 +117,7 @@ async def check_subscription(user_id: int) -> bool:
             return False
     return True
 
-async def ask_for_payment(target:uccio Message | CallbackQuery, state: FSMContext):
+async def ask_for_payment(target: Union[Message, CallbackQuery], state: FSMContext):
     user_id = target.from_user.id
     text = (
         "💳 <b>Karta turi:</b> HUMO\n"
@@ -133,26 +133,25 @@ async def ask_for_payment(target:uccio Message | CallbackQuery, state: FSMContex
     await bot.send_message(user_id, "✅ Endi to‘lovni amalga oshirgach, <b>chekni yuboring</b> (rasm yoki fayl):")
     await state.set_state(RegistrationState.waiting_for_payment_check)
 
-# --- Yangi funksiya: Reytingni chiqarish ---
 async def show_rating(message: Message):
     try:
         sheet = connect_to_sheet()
         data = sheet.get_all_values()
-    except Exception as e:
+    except Exception:
         await message.answer("⚠️ Reytingni olishda xatolik yuz berdi.")
         return
 
     if len(data) <= 1:
-        text = "📊 Reytinglar hali mavjud emas."
+        text = "📊 Reytinglar hali mavjud emas.\n\n"
     else:
-        lines = ["🏆 <b>Reyting jadvali:</b>\n"]
-        for idx, row in enumerate(data[1:21], start=1):  # Top 20
+        lines = ["🏆 <b>Reyting jadvali (Top 20):</b>\n"]
+        for idx, row in enumerate(data[1:21], start=1):
             nickname = row[0] if len(row) > 0 else "-"
             pubg_id = row[1] if len(row) > 1 else "-"
             lines.append(f"{idx}. <b>{nickname}</b> (ID: {pubg_id})")
-        text = "\n".join(lines)
+        text = "\n".join(lines) + "\n\n"
 
-    text += f"\n\n📋 To'liq reyting jadvali:\n{RATING_SHEET_LINK}"
+    text += f"📋 To'liq reyting jadvali:\n{RATING_SHEET_LINK}"
     await message.answer(text, disable_web_page_preview=True)
 
 class SubscriptionMiddleware:
@@ -203,7 +202,6 @@ async def start_handler(message: Message):
             reply_markup=get_subscription_keyboard()
         )
 
-# Endi barcha commandlar ishlaydi
 @dp.message(Command(commands=["register", "reyting", "mygames", "contactwithadmin", "about", "help"]))
 async def universal_commands(message: Message, state: FSMContext):
     cmd = message.text.lower()
