@@ -22,9 +22,10 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.exceptions import TelegramBadRequest
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "7337873747"))
 SHEET_JSON = os.getenv("SHEET_JSON", "Reyting-bot.json")
 REQUIRED_CHANNELS = [channel.strip() for channel in os.getenv("REQUIRED_CHANNELS", "@M24SHaxa_youtube").split(',')]
+RATING_SHEET_LINK = "https://docs.google.com/spreadsheets/d/1T0JuaRetTKusLkR8Kb21Ie87kA2Z4nv3fDJ2ziyuAh4/edit?gid=0#gid=0"
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set. Put it into .env as BOT_TOKEN=your_token")
@@ -116,8 +117,8 @@ async def check_subscription(user_id: int) -> bool:
             return False
     return True
 
-async def ask_for_payment(target: Union[Message, CallbackQuery], state: FSMContext):
-    user_id = target.from_user.id if isinstance(target, Message) else target.from_user.id
+async def ask_for_payment(target:uccio Message | CallbackQuery, state: FSMContext):
+    user_id = target.from_user.id
     text = (
         "💳 <b>Karta turi:</b> HUMO\n"
         "💳 <b>Karta raqami:</b> <code>9860 6004 1512 3691</code>\n\n"
@@ -132,21 +133,44 @@ async def ask_for_payment(target: Union[Message, CallbackQuery], state: FSMConte
     await bot.send_message(user_id, "✅ Endi to‘lovni amalga oshirgach, <b>chekni yuboring</b> (rasm yoki fayl):")
     await state.set_state(RegistrationState.waiting_for_payment_check)
 
+# --- Yangi funksiya: Reytingni chiqarish ---
+async def show_rating(message: Message):
+    try:
+        sheet = connect_to_sheet()
+        data = sheet.get_all_values()
+    except Exception as e:
+        await message.answer("⚠️ Reytingni olishda xatolik yuz berdi.")
+        return
+
+    if len(data) <= 1:
+        text = "📊 Reytinglar hali mavjud emas."
+    else:
+        lines = ["🏆 <b>Reyting jadvali:</b>\n"]
+        for idx, row in enumerate(data[1:21], start=1):  # Top 20
+            nickname = row[0] if len(row) > 0 else "-"
+            pubg_id = row[1] if len(row) > 1 else "-"
+            lines.append(f"{idx}. <b>{nickname}</b> (ID: {pubg_id})")
+        text = "\n".join(lines)
+
+    text += f"\n\n📋 To'liq reyting jadvali:\n{RATING_SHEET_LINK}"
+    await message.answer(text, disable_web_page_preview=True)
+
 class SubscriptionMiddleware:
     async def __call__(self, handler, event, data):
         allow = False
         if isinstance(event, Message):
-            if event.text in ("/start", "/help"):
+            if event.text and event.text.startswith(("/start", "/help", "/register", "/mygames", "/contactwithadmin", "/about", "/reyting")):
                 allow = True
         elif isinstance(event, CallbackQuery):
             if event.data == "check_subscription":
                 allow = True
         if allow:
             return await handler(event, data)
+
         user_id = event.from_user.id
         if not await check_subscription(user_id):
             kanal_text = "kanallarga" if len(REQUIRED_CHANNELS) > 1 else "kanalga"
-            text = f"❌ {kanal_text.capitalize()} obuna bo‘lishingiz kerak. ✅ Tekshirish tugmasini bosing."
+            text = f"❌ Botdan foydalanish uchun {kanal_text} obuna bo‘lishingiz kerak."
             markup = get_subscription_keyboard()
             if isinstance(event, Message):
                 await event.answer(text, reply_markup=markup)
@@ -175,54 +199,38 @@ async def start_handler(message: Message):
     else:
         kanal_text = "kanallarga" if len(REQUIRED_CHANNELS) > 1 else "kanalga"
         await message.answer(
-            "👋 Assalomu alaykum!\n\n"
-            f"Botdan foydalanish uchun quyidagi {kanal_text} obuna bo‘ling va ✅ Tekshirish tugmasini bosing 👇",
+            f"👋 Assalomu alaykum!\n\nBotdan foydalanish uchun quyidagi {kanal_text} obuna bo‘ling va ✅ Tekshirish tugmasini bosing 👇",
             reply_markup=get_subscription_keyboard()
         )
 
-@dp.message(Command("register"))
-async def cmd_register(message: Message, state: FSMContext):
-    await ask_for_payment(message, state)
-
-@dp.message(Command("mygames"))
-async def cmd_mygames(message: Message):
-    await message.answer("🎮 Sizda hozircha o‘yin yo‘q.")
-
-@dp.message(Command("contactwithadmin"))
-async def cmd_contact_admin(message: Message):
-    await message.answer("📩 Admin bilan bog‘lanish: @m24_shaxa_yt")
-
-@dp.message(Command("about"))
-async def cmd_about(message: Message):
-    await message.answer(
-        "🎮 PUBG MOBILE TURNIR BOT 🎮\n\n"
-        "Bu bot orqali siz pullik PUBG Mobile turnirlarida qatnashishingiz,\n"
-        "to‘lov qilgan holda ishtirok etishingiz va sovrinli o‘rinlar uchun kurashishingiz mumkin! 🏆"
-    )
-
-@dp.message(Command("help"))
-async def cmd_help(message: Message):
-    await message.answer(
-        "/start\n/register\n/mygames\n/contactwithadmin\n/about\n/help\n/reyting"
-    )
-
-@dp.message(Command("reyting"))
-async def cmd_reyting(message: Message):
-    try:
-        sheet = connect_to_sheet()
-        data = sheet.get_all_values()
-    except Exception:
-        await message.answer("⚠️ Reytingni olishda xatolik yuz berdi.")
-        return
-    if len(data) <= 1:
-        await message.answer("📊 Reytinglar hali mavjud emas.")
-        return
-    lines = ["🏆 Reyting:\n"]
-    for idx, row in enumerate(data[1:21], start=1):
-        nickname = row[0] if len(row) > 0 else "-"
-        pubg_id = row[1] if len(row) > 1 else "-"
-        lines.append(f"{idx}. {nickname} (ID: {pubg_id})")
-    await message.answer("\n".join(lines))
+# Endi barcha commandlar ishlaydi
+@dp.message(Command(commands=["register", "reyting", "mygames", "contactwithadmin", "about", "help"]))
+async def universal_commands(message: Message, state: FSMContext):
+    cmd = message.text.lower()
+    if "/register" in cmd:
+        await ask_for_payment(message, state)
+    elif "/reyting" in cmd:
+        await show_rating(message)
+    elif "/mygames" in cmd:
+        await message.answer("🎮 Sizda hozircha o‘yin yo‘q.")
+    elif "/contactwithadmin" in cmd:
+        await message.answer("📩 Admin bilan bog‘lanish: @m24_shaxa_yt")
+    elif "/about" in cmd:
+        await message.answer(
+            "🎮 PUBG MOBILE TURNIR BOT 🎮\n\n"
+            "Bu bot orqali siz pullik PUBG Mobile turnirlarida qatnashishingiz,\n"
+            "to‘lov qilgan holda ishtirok etishingiz va sovrinli o‘rinlar uchun kurashishingiz mumkin! 🏆"
+        )
+    elif "/help" in cmd:
+        await message.answer(
+            "/start — Botni qayta ishga tushirish\n"
+            "/register — Ro'yxatdan o'tish\n"
+            "/reyting — Reytingni ko'rish\n"
+            "/mygames — Mening o'yinlarim\n"
+            "/contactwithadmin — Admin bilan bog'lanish\n"
+            "/about — Bot haqida\n"
+            "/help — Yordam"
+        )
 
 @dp.callback_query(F.data == "check_subscription")
 async def subscription_callback(call: CallbackQuery):
@@ -235,8 +243,7 @@ async def subscription_callback(call: CallbackQuery):
     else:
         kanal_text = "kanallarga" if len(REQUIRED_CHANNELS) > 1 else "kanalga"
         await call.message.edit_text(
-            f"❌ Siz hali {kanal_text} obuna bo‘lmagansiz.\n"
-            f"Iltimos, {kanal_text.capitalize()} obuna bo‘ling va ✅ Tekshirish tugmasini yana bosing 👇",
+            f"❌ Siz hali {kanal_text} obuna bo‘lmagansiz.\nIltimos, obuna bo‘ling va ✅ Tekshirish tugmasini yana bosing 👇",
             reply_markup=get_subscription_keyboard()
         )
     await call.answer()
@@ -244,6 +251,21 @@ async def subscription_callback(call: CallbackQuery):
 @dp.callback_query(F.data == "register")
 async def register_callback(call: CallbackQuery, state: FSMContext):
     await ask_for_payment(call, state)
+    await call.answer()
+
+@dp.callback_query(F.data == "results")
+async def results_callback(call: CallbackQuery):
+    await show_rating(call.message)
+    await call.answer()
+
+@dp.callback_query(F.data == "my_games")
+async def my_games_callback(call: CallbackQuery):
+    await call.message.answer("🎮 Sizda hozircha o‘yin yo‘q.")
+    await call.answer()
+
+@dp.callback_query(F.data == "contact_admin")
+async def contact_admin_callback(call: CallbackQuery):
+    await call.message.answer("📩 Admin bilan bog‘lanish: @m24_shaxa_yt")
     await call.answer()
 
 @dp.message(RegistrationState.waiting_for_payment_check, F.photo | F.document)
@@ -282,7 +304,7 @@ async def approve_callback(call: CallbackQuery):
         await call.answer("Siz admin emassiz.", show_alert=True)
         return
     user_id = int(call.data.split(":")[1])
-    await bot.send_message(user_id, "✅ Chekingiz tasdiqlandi. Endi PUBG nickname va ID'ingizni yuboring.")
+    await bot.send_message(user_id, "✅ Chekingiz tasdiqlandi. Endi PUBG nickname va ID'ingizni yuboring.\nMasalan: Nickname 123456789")
     key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
     await dp.storage.set_state(key, RegistrationState.waiting_for_pubg_nick)
     await call.message.edit_reply_markup(reply_markup=None)
@@ -305,16 +327,17 @@ async def handle_pubg_info(message: Message, state: FSMContext):
     text = message.text or ""
     tokens = text.replace(",", " ").split()
     pubg_nick = " ".join(tokens[:-1]) if len(tokens) >= 2 else text.strip()
-    pubg_id = tokens[-1] if len(tokens) >= 2 else ""
+    pubg_id = tokens[-1] if len(tokens) >= 2 else "ID not provided"
     nickname = pubg_nick or message.from_user.full_name
-    pubg_id = pubg_id or "ID not provided"
+
     ok = append_to_sheet(nickname, pubg_id)
     if ok:
         await message.answer("📋 Ma'lumot qabul qilindi. Reytingga qoʻshildi. Rahmat!", reply_markup=reply_social_menu)
     else:
         await message.answer("⚠️ Reytingga qoʻshishda xatolik yuz berdi. Admin bilan bog‘laning.", reply_markup=reply_social_menu)
+    
     try:
-        await bot.send_message(ADMIN_ID, f"🆕 Yangi qatnashchi: {message.from_user.full_name}\nPUBG: {nickname} | ID: {pubg_id}\nUser ID: {message.from_user.id}")
+        await bot.send_message(ADMIN_ID, f"🆕 Yangi qatnashchi:\n👤 {message.from_user.full_name}\n🎮 Nick: {nickname}\n🆔 ID: {pubg_id}\n🆔 User ID: {message.from_user.id}")
     except Exception:
         pass
     await state.clear()
