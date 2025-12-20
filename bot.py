@@ -149,6 +149,8 @@ class SubscriptionMiddleware:
         if allow:
             return await handler(event, data)
         user_id = event.from_user.id
+        if user_id == ADMIN_ID:
+            return await handler(event, data)
         if not await check_subscription(user_id):
             kanal_text = "kanallarga" if len(REQUIRED_CHANNELS) > 1 else "kanalga"
             text = f"❌ Botdan foydalanish uchun {kanal_text} obuna bo‘lishingiz kerak."
