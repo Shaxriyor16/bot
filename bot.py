@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import json
 from typing import Union
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,11 +23,13 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.exceptions import TelegramBadRequest
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7337873747"))
-SHEET_JSON = os.getenv("SHEET_JSON", "Reyting-bot.json")
+SHEET_JSON_CONTENT = os.getenv("SHEET_JSON_CONTENT", "")
 REQUIRED_CHANNELS = [channel.strip() for channel in os.getenv("REQUIRED_CHANNELS", "@M24SHaxa_youtube").split(',')]
 RATING_SHEET_LINK = "https://docs.google.com/spreadsheets/d/1T0JuaRetTKusLkR8Kb21Ie87kA2Z4nv3fDJ2ziyuAh4/edit?gid=0#gid=0"
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set. Put it into .env as BOT_TOKEN=your_token")
+if not SHEET_JSON_CONTENT:
+    raise RuntimeError("SHEET_JSON_CONTENT is not set. Put the JSON content into .env as SHEET_JSON_CONTENT=your_json")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -37,7 +40,7 @@ dp = Dispatcher(storage=MemoryStorage())
 def connect_to_sheet(spreadsheet_name: str = "Pubg Reyting", worksheet_name: str = "Reyting-bot"):
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(SHEET_JSON, scope)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(SHEET_JSON_CONTENT), scope)
         client = gspread.authorize(creds)
         sheet = client.open(spreadsheet_name).worksheet(worksheet_name)
         return sheet
@@ -288,7 +291,7 @@ async def reject_callback(call: CallbackQuery):
         return
     user_id = int(call.data.split(":")[1])
     key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
-    await dp.storage.clear_state(key)
+    await dp.storage.set_state(key, None)
     await bot.send_message(user_id, "❌ Chekingiz rad etildi. Qayta urinib ko‘ring.")
     await call.message.edit_reply_markup(reply_markup=None)
     await call.answer("❌ Rad etildi")
