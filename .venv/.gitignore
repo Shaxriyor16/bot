@@ -1,0 +1,298 @@
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs
+*.log
+bot.log
+api.log
+*.log.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Database
+*.db
+*.sqlite3
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# Credentials
+credentials.json
+service-account.json
+*.pem
+*.key
+
+---
+
+# ========================================
+# docker-compose.yml
+# ========================================
+version: '3.8'
+
+services:
+  # Telegram Bot
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    container_name: pubg-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - pubg-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: pubg-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - pubg-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis (Optional - for caching)
+  redis:
+    image: redis:7-alpine
+    container_name: pubg-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - pubg-network
+    command: redis-server --appendonly yes
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Nginx (Optional - for production)
+  nginx:
+    image: nginx:alpine
+    container_name: pubg-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./dashboard.html:/usr/share/nginx/html/index.html:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+    networks:
+      - pubg-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  pubg-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+
+---
+
+# ========================================
+# Dockerfile.bot
+# ========================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy bot files
+COPY pubg_bot_v2.py .
+COPY .env .
+
+# Create logs directory
+RUN mkdir -p /app/logs
+
+# Run bot
+CMD ["python", "-u", "pubg_bot_v2.py"]
+
+---
+
+# ========================================
+# Dockerfile.api
+# ========================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy API files
+COPY flask_api_server.py .
+COPY pubg_bot_v2.py .
+COPY .env .
+
+# Create logs directory
+RUN mkdir -p /app/logs
+
+# Expose port
+EXPOSE 5000
+
+# Run API server
+CMD ["python", "-u", "flask_api_server.py"]
+
+---
+
+# ========================================
+# nginx.conf
+# ========================================
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream api_backend {
+        server api:5000;
+    }
+
+    server {
+        listen 80;
+        server_name localhost;
+
+        # Dashboard
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+            try_files $uri $uri/ /index.html;
+        }
+
+        # API Proxy
+        location /api/ {
+            proxy_pass http://api_backend/api/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+
+        # Gzip compression
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json;
+    }
+
+    # SSL Configuration (if using HTTPS)
+    # server {
+    #     listen 443 ssl http2;
+    #     server_name your-domain.com;
+    #
+    #     ssl_certificate /etc/nginx/ssl/cert.pem;
+    #     ssl_certificate_key /etc/nginx/ssl/key.pem;
+    #
+    #     # ... rest of configuration ...
+    # }
+}
+
+---
+
+# ========================================
+# docker-start.sh
+# ========================================
+#!/bin/bash
+
+echo "🐳 Starting Docker containers..."
+
+# Build and start
+docker-compose up -d --build
+
+# Check status
+docker-compose ps
+
+echo ""
+echo "✅ Services started!"
+echo ""
+echo "Access points:"
+echo "  Dashboard: http://localhost"
+echo "  API:       http://localhost:5000"
+echo ""
+echo "Logs:"
+echo "  docker-compose logs -f bot"
+echo "  docker-compose logs -f api"
+echo ""
+echo "Stop:"
+echo "  docker-compose down"
